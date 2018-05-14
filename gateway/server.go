@@ -86,11 +86,20 @@ func main() {
 	prometheusQuery := metrics.NewPrometheusQuery(config.PrometheusHost, config.PrometheusPort, &http.Client{})
 	listFunctions := metrics.AddMetricsHandler(faasHandlers.ListFunctions, prometheusQuery)
 	faasHandlers.Proxy = handlers.MakeCallIDMiddleware(faasHandlers.Proxy)
-	r := mux.NewRouter()
 
+	r := mux.NewRouter()
+	// max wait time to start a function = maxPollCount * functionPollInterval
+
+	scalingConfig := handlers.ScalingConfig{
+		MaxPollCount:         uint(1000),
+		FunctionPollInterval: time.Millisecond * 10,
+		CacheExpiry:          time.Second * 5, // freshness of replica values before going stale
+	}
+
+	scalingProxy := handlers.MakeScalingHandler(faasHandlers.Proxy, queryFunction, scalingConfig)
 	// r.StrictSlash(false)	// This didn't work, so register routes twice.
-	r.HandleFunc("/function/{name:[-a-zA-Z_0-9]+}", faasHandlers.Proxy)
-	r.HandleFunc("/function/{name:[-a-zA-Z_0-9]+}/", faasHandlers.Proxy)
+	r.HandleFunc("/function/{name:[-a-zA-Z_0-9]+}", scalingProxy)
+	r.HandleFunc("/function/{name:[-a-zA-Z_0-9]+}/", scalingProxy)
 
 	r.HandleFunc("/system/alert", faasHandlers.Alert)
 
